@@ -52,8 +52,7 @@ func main() {
 	cfg.wg.Add(1)
 	go cfg.crawlPage(baseURL)
 	cfg.wg.Wait()
-	fmt.Println("printing result:")
-	for k := range cfg.pages {
-		fmt.Printf("- %s\n", k)
-	}
+	fmt.Println("Saving crawl into `report.csv`")
+	writeCSVReport(cfg.pages, "report.csv")
 }
+
