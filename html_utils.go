@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -136,9 +137,32 @@ func getHTML(rawURL string) (string, error) {
 	return string(content), nil
 }
 
-func crawlPage(rawBaseURL, rawCurrentURL string, pages map[string]int) {
-	if !strings.HasPrefix(rawCurrentURL, rawBaseURL) {
-		log.Printf("- %s: %s", rawBaseURL, rawCurrentURL)
+type config struct {
+	pages              map[string]PageData
+	baseURL            *url.URL
+	mu                 *sync.Mutex
+	concurrencyControl chan struct{}
+	wg                 *sync.WaitGroup
+}
+
+func (cfg *config) addPageVisit(normalizedURL string) (isFirst bool) {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+	_, ok := cfg.pages[normalizedURL]
+	if ok {
+		return true
+	}
+	return false
+}
+
+func (cfg *config) crawlPage(rawCurrentURL string) {
+	parsedURL, err := url.Parse(rawCurrentURL)
+	if err != nil {
+		log.Printf("problem when parsing the URL: %s", err.Error())
+		return
+	}
+	if parsedURL.Hostname() != cfg.baseURL.Hostname() {
+		log.Printf("- %s: %s", cfg.baseURL.String(), rawCurrentURL)
 		return
 	}
 	normURL, err := normalizeURL(rawCurrentURL)
@@ -146,12 +170,8 @@ func crawlPage(rawBaseURL, rawCurrentURL string, pages map[string]int) {
 		log.Printf("problem when normalizing `%s`: %s", rawCurrentURL, err.Error())
 		return
 	}
-	val, ok := pages[normURL]
-	if ok {
-		pages[normURL] = val + 1
+	if cfg.addPageVisit(normURL) {
 		return
-	} else {
-		pages[normURL] = 1
 	}
 	log.Printf("getting content from `%s`", rawCurrentURL)
 	content, err := getHTML(rawCurrentURL)
@@ -159,16 +179,19 @@ func crawlPage(rawBaseURL, rawCurrentURL string, pages map[string]int) {
 		log.Printf("problem when fetching content from `%s`: %s", rawCurrentURL, err.Error())
 		return
 	}
-	parsedURL, err := url.Parse(rawCurrentURL)
-	if err != nil {
-		log.Printf("problem when parsing the URL: %s", err.Error())
-		return
+	cfg.mu.Lock()
+	cfg.pages[normURL] = extractPageData(content, rawCurrentURL)
+	cfg.mu.Unlock()
+	
+	for _, url := range cfg.pages[normURL].OutgoingLinks {
+		cfg.wg.Add(1)
+		go func() {
+			defer func() {
+				cfg.wg.Done()
+				<-cfg.concurrencyControl
+			}()
+			cfg.concurrencyControl <- struct{}{}
+			cfg.crawlPage(url)
+		}()
 	}
-	urls, err := getURLsFromHTML(content, parsedURL)
-	if err != nil {
-		log.Printf("problem when extracting the URLs from content: %s", err.Error())
-	}
-	for _, url := range urls {
-		crawlPage(rawBaseURL, url, pages)
-	}
-} 
+}

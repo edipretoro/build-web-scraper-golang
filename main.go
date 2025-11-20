@@ -2,10 +2,19 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
+	"net/url"
 	"os"
+	"sync"
 )
 
+func init() {
+    log.SetOutput(io.Discard)
+}
+
 func main() {
+	maxConcurrency := 10
 	args := os.Args[1:]
 	if len(args) < 1 {
 		fmt.Println("no website provided")
@@ -16,10 +25,22 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("starting crawl of:", args[0])
-	pages := make(map[string]int)
-	crawlPage(args[0], args[0], pages)
+	parsedURL, err := url.Parse(args[0])
+	if err != nil {
+		log.Printf("problem when parsing the URL: %s", err.Error())
+		os.Exit(1)
+	}
+	cfg := config{
+		pages: make(map[string]PageData),
+		baseURL: parsedURL,
+		mu: &sync.Mutex{},
+		concurrencyControl: make(chan struct{}, maxConcurrency),
+		wg: &sync.WaitGroup{},
+	}
+	cfg.crawlPage(args[0])
+	cfg.wg.Wait()
 	fmt.Println("printing result:")
-	for k, v := range pages {
-		fmt.Printf("- %s: %d\n", k, v)
+	for k, _ := range cfg.pages {
+		fmt.Printf("- %s\n", k)
 	}
 }
