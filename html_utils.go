@@ -139,6 +139,7 @@ func getHTML(rawURL string) (string, error) {
 
 type config struct {
 	pages              map[string]PageData
+	maxPages           int
 	baseURL            *url.URL
 	mu                 *sync.Mutex
 	concurrencyControl chan struct{}
@@ -156,6 +157,14 @@ func (cfg *config) addPageVisit(normalizedURL string) (isFirst bool) {
 }
 
 func (cfg *config) crawlPage(rawCurrentURL string) {
+	cfg.concurrencyControl <- struct{}{}
+	defer func() {
+		cfg.wg.Done()
+		<-cfg.concurrencyControl
+	}()
+	if len(cfg.pages) >= int(cfg.maxPages) {
+		return
+	}
 	parsedURL, err := url.Parse(rawCurrentURL)
 	if err != nil {
 		log.Printf("problem when parsing the URL: %s", err.Error())
@@ -185,13 +194,6 @@ func (cfg *config) crawlPage(rawCurrentURL string) {
 	
 	for _, url := range cfg.pages[normURL].OutgoingLinks {
 		cfg.wg.Add(1)
-		go func() {
-			defer func() {
-				cfg.wg.Done()
-				<-cfg.concurrencyControl
-			}()
-			cfg.concurrencyControl <- struct{}{}
-			cfg.crawlPage(url)
-		}()
+		go cfg.crawlPage(url)
 	}
 }
