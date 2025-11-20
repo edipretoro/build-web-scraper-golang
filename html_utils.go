@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -123,7 +124,8 @@ func getHTML(rawURL string) (string, error) {
 	if resp.StatusCode >= 400 {
 		return "", errors.New("problem when fetching the URL")
 	}
-	if resp.Header.Get("Content-Type") != "text/html" {
+	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") {
+		log.Printf("Bad Content-Type: %s", resp.Header.Get("Content-Type"))
 		return "", errors.New("content fetched is not text/html")
 	}
 	content, err := io.ReadAll(resp.Body)
@@ -133,3 +135,40 @@ func getHTML(rawURL string) (string, error) {
 	
 	return string(content), nil
 }
+
+func crawlPage(rawBaseURL, rawCurrentURL string, pages map[string]int) {
+	if !strings.HasPrefix(rawCurrentURL, rawBaseURL) {
+		log.Printf("- %s: %s", rawBaseURL, rawCurrentURL)
+		return
+	}
+	normURL, err := normalizeURL(rawCurrentURL)
+	if err != nil {
+		log.Printf("problem when normalizing `%s`: %s", rawCurrentURL, err.Error())
+		return
+	}
+	val, ok := pages[normURL]
+	if ok {
+		pages[normURL] = val + 1
+		return
+	} else {
+		pages[normURL] = 1
+	}
+	log.Printf("getting content from `%s`", rawCurrentURL)
+	content, err := getHTML(rawCurrentURL)
+	if err != nil {
+		log.Printf("problem when fetching content from `%s`: %s", rawCurrentURL, err.Error())
+		return
+	}
+	parsedURL, err := url.Parse(rawCurrentURL)
+	if err != nil {
+		log.Printf("problem when parsing the URL: %s", err.Error())
+		return
+	}
+	urls, err := getURLsFromHTML(content, parsedURL)
+	if err != nil {
+		log.Printf("problem when extracting the URLs from content: %s", err.Error())
+	}
+	for _, url := range urls {
+		crawlPage(rawBaseURL, url, pages)
+	}
+} 

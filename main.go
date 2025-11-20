@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 )
 
@@ -17,9 +16,10 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("starting crawl of:", args[0])
-	content, err := getHTML(args[0])
-	if err != nil {
-		log.Fatalf("problem when fetching the content: %s", err.Error())
+	pages := make(map[string]int)
+	crawlPage(args[0], args[0], pages)
+	fmt.Println("printing result:")
+	for k, v := range pages {
+		fmt.Printf("- %s: %d\n", k, v)
 	}
-	fmt.Print(content)
 }
